@@ -1,0 +1,497 @@
+<!DOCTYPE html>
+<html lang="ko" class="h-full">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI 가위바위보 스켈레톤 배틀</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Mediapipe Hands & Camera Utils -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Noto+Sans+KR:wght@400;700;900&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Noto Sans KR', sans-serif;
+            overflow: hidden;
+            background-color: #05050a;
+            color: #ffffff;
+            margin: 0;
+            padding: 0;
+            width: 100vw;
+            height: 100vh;
+        }
+        .font-cyber {
+            font-family: 'Orbitron', sans-serif;
+        }
+        .neon-glow {
+            text-shadow: 0 0 15px rgba(56, 189, 248, 0.8), 0 0 30px rgba(56, 189, 248, 0.4);
+        }
+        .neon-box {
+            box-shadow: 0 0 25px rgba(56, 189, 248, 0.3), inset 0 0 15px rgba(56, 189, 248, 0.2);
+        }
+        /* Mirror video for natural UX */
+        .mirror {
+            transform: scaleX(-1);
+        }
+        /* Lightning Flash Animation */
+        @keyframes lightning {
+            0% { background-color: rgba(255, 255, 255, 0); }
+            10% { background-color: rgba(255, 255, 255, 0.9); }
+            20% { background-color: rgba(255, 255, 255, 0.1); }
+            30% { background-color: rgba(255, 255, 255, 0.8); }
+            50% { background-color: rgba(186, 230, 253, 0.5); }
+            100% { background-color: rgba(5, 5, 10, 0); }
+        }
+        .flash-effect {
+            animation: lightning 0.8s ease-out forwards;
+        }
+    </style>
+</head>
+<body class="h-full w-full flex flex-col relative select-none">
+
+    <!-- Fullscreen Video & Canvas Container -->
+    <div class="absolute inset-0 w-screen h-screen overflow-hidden z-0 bg-black">
+        <video id="webcam" class="absolute inset-0 w-full h-full object-cover mirror opacity-85" autoplay playsinline muted></video>
+        <canvas id="output_canvas" class="absolute inset-0 w-full h-full object-cover mirror z-10"></canvas>
+        <!-- Dynamic Effect Canvas for Flowers / Lightning / Particles -->
+        <canvas id="effect_canvas" class="absolute inset-0 w-full h-full object-cover z-20 pointer-events-none"></canvas>
+        <div id="flash-overlay" class="absolute inset-0 z-25 pointer-events-none"></div>
+        <div class="absolute inset-0 bg-gradient-to-t from-slate-950 via-transparent to-slate-950 opacity-80 z-30 pointer-events-none"></div>
+    </div>
+
+    <!-- Top HUD Bar -->
+    <header class="relative z-40 flex justify-between items-center p-6 md:px-12 w-full">
+        <div class="flex items-center space-x-3 bg-slate-900/80 backdrop-blur-md px-5 py-2.5 rounded-2xl border border-sky-500/30 neon-box">
+            <span class="inline-block w-3 h-3 rounded-full bg-emerald-400 animate-ping"></span>
+            <h1 class="font-cyber font-black tracking-wider text-sky-400 text-lg md:text-xl">AI SKELETON BATTLE</h1>
+        </div>
+        
+        <div class="flex space-x-4">
+            <div class="bg-slate-900/80 backdrop-blur-md px-5 py-2.5 rounded-2xl border border-sky-500/30 text-center neon-box">
+                <span class="text-xs text-slate-400 block font-cyber">PLAYER</span>
+                <span id="player-score" class="text-2xl font-black font-cyber text-sky-400">0</span>
+            </div>
+            <div class="bg-slate-900/80 backdrop-blur-md px-5 py-2.5 rounded-2xl border border-purple-500/30 text-center shadow-lg">
+                <span class="text-xs text-slate-400 block font-cyber">AI SYSTEM</span>
+                <span id="ai-score" class="text-2xl font-black font-cyber text-purple-400">0</span>
+            </div>
+        </div>
+    </header>
+
+    <!-- Center Content Overlay -->
+    <main class="relative z-40 flex-1 flex flex-col items-center justify-between p-6 pointer-events-none">
+        
+        <!-- Status & Countdown Panel -->
+        <div class="text-center mt-2">
+            <div id="gesture-indicator" class="inline-block bg-slate-900/90 backdrop-blur-md border border-slate-700 px-6 py-2 rounded-full text-sm md:text-base font-semibold text-sky-300 tracking-wide mb-3 shadow-xl">
+                손을 카메라에 보여주세요 (자동 배틀 시작)
+            </div>
+            <div id="countdown-display" class="font-cyber font-black text-6xl md:text-8xl text-yellow-400 drop-shadow-[0_10px_20px_rgba(234,179,8,0.5)] scale-0 transition-transform duration-200">
+                READY
+            </div>
+        </div>
+
+        <!-- Battle Arena Display -->
+        <div class="grid grid-cols-2 gap-8 md:gap-24 w-full max-w-4xl items-center px-4">
+            <!-- Player Choice Card -->
+            <div class="flex flex-col items-center">
+                <div class="text-xs font-cyber tracking-widest text-sky-400 mb-2 uppercase">PLAYER GESTURE</div>
+                <div id="player-choice-box" class="w-28 h-28 md:w-40 md:h-40 rounded-3xl bg-slate-900/80 backdrop-blur-xl border-2 border-sky-500/50 flex items-center justify-center text-5xl md:text-7xl neon-box transition-all duration-300">
+                    ✊
+                </div>
+                <span id="player-detected-text" class="mt-2 text-sm font-bold text-slate-300 bg-slate-900/80 px-3 py-1 rounded-full">인식 대기중...</span>
+            </div>
+
+            <!-- AI Choice Card -->
+            <div class="flex flex-col items-center">
+                <div class="text-xs font-cyber tracking-widest text-purple-400 mb-2 uppercase">AI CHOICE</div>
+                <div id="ai-choice-box" class="w-28 h-28 md:w-40 md:h-40 rounded-3xl bg-slate-900/80 backdrop-blur-xl border-2 border-purple-500/50 flex items-center justify-center text-5xl md:text-7xl shadow-xl transition-all duration-300">
+                    🤖
+                </div>
+                <span id="ai-detected-text" class="mt-2 text-sm font-bold text-slate-300 bg-slate-900/80 px-3 py-1 rounded-full">상대 대기중</span>
+            </div>
+        </div>
+
+        <!-- Result Banner -->
+        <div id="result-banner" class="text-3xl md:text-5xl font-black font-cyber tracking-wider text-white opacity-0 transition-opacity duration-300 mb-6 drop-shadow-lg">
+            VICTORY!
+        </div>
+    </main>
+
+    <!-- Bottom Status Bar / Manual Override -->
+    <footer class="relative z-40 p-6 md:pb-10 flex justify-center items-center pointer-events-auto">
+        <div id="status-footer-text" class="text-slate-400 text-sm font-cyber bg-slate-900/80 backdrop-blur-md px-6 py-3 rounded-2xl border border-sky-500/20">
+            ✋ 카메라에 손을 올리면 자동으로 배틀이 시작됩니다!
+        </div>
+    </footer>
+
+    <!-- Game, Audio & Visual FX Logic Script -->
+    <script>
+        const videoElement = document.getElementById('webcam');
+        const canvasElement = document.getElementById('output_canvas');
+        const canvasCtx = canvasElement.getContext('2d');
+        const effectCanvas = document.getElementById('effect_canvas');
+        const effectCtx = effectCanvas.getContext('2d');
+        const flashOverlay = document.getElementById('flash-overlay');
+
+        const gestureIndicator = document.getElementById('gesture-indicator');
+        const countdownDisplay = document.getElementById('countdown-display');
+        const playerChoiceBox = document.getElementById('player-choice-box');
+        const aiChoiceBox = document.getElementById('ai-choice-box');
+        const playerDetectedText = document.getElementById('player-detected-text');
+        const aiDetectedText = document.getElementById('ai-detected-text');
+        const resultBanner = document.getElementById('result-banner');
+        const startBtn = document.getElementById('start-btn');
+        const playerScoreEl = document.getElementById('player-score');
+        const aiScoreEl = document.getElementById('ai-score');
+
+        let playerScore = 0;
+        let aiScore = 0;
+        let currentGesture = 'UNKNOWN';
+        let isPlaying = false;
+        let handDetected = false;
+        let particles = [];
+        let lightningBolts = [];
+
+        // Audio Context for synthesized sound effects
+        let audioCtx = null;
+        function initAudio() {
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+        }
+
+        // Sharala Sound (Victory Chime Arpeggio)
+        function playSharalaSound() {
+            initAudio();
+            if (!audioCtx) return;
+            const notes = [523.25, 659.25, 783.99, 1046.50, 1318.51, 1567.98]; // C5, E5, G5, C6, E6, G6
+            notes.forEach((freq, index) => {
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(freq, audioCtx.currentTime + index * 0.08);
+                
+                gain.gain.setValueAtTime(0.15, audioCtx.currentTime + index * 0.08);
+                gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + index * 0.08 + 0.6);
+                
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                
+                osc.start(audioCtx.currentTime + index * 0.08);
+                osc.stop(audioCtx.currentTime + index * 0.08 + 0.7);
+            });
+        }
+
+        // Thunder Sound & Lightning Effect (Defeat)
+        function playThunderSound() {
+            initAudio();
+            if (!audioCtx) return;
+            
+            // White noise buffer for thunder rumble
+            const bufferSize = audioCtx.sampleRate * 1.5;
+            const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+            const data = buffer.getChannelData(0);
+            for (let i = 0; i < bufferSize; i++) {
+                data[i] = Math.random() * 2 - 1;
+            }
+
+            const noise = audioCtx.createBufferSource();
+            noise.buffer = buffer;
+
+            // Lowpass filter for deep thunder roar
+            const filter = audioCtx.createBiquadFilter();
+            filter.type = 'lowpass';
+            filter.frequency.setValueAtTime(300, audioCtx.currentTime);
+            filter.frequency.exponentialRampToValueAtTime(50, audioCtx.currentTime + 1.5);
+
+            const gain = audioCtx.createGain();
+            gain.gain.setValueAtTime(0.8, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 1.5);
+
+            noise.connect(filter);
+            filter.connect(gain);
+            gain.connect(audioCtx.destination);
+
+            noise.start();
+
+            // Trigger Visual Flash
+            flashOverlay.classList.add('flash-effect');
+            setTimeout(() => {
+                flashOverlay.classList.remove('flash-effect');
+            }, 800);
+        }
+
+        // Resize all canvases to full screen resolution dynamically
+        function resizeCanvas() {
+            canvasElement.width = window.innerWidth;
+            canvasElement.height = window.innerHeight;
+            effectCanvas.width = window.innerWidth;
+            effectCanvas.height = window.innerHeight;
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        // Particle System for Victory Flowers
+        class FlowerParticle {
+            constructor() {
+                this.x = Math.random() * effectCanvas.width;
+                this.y = -50;
+                this.size = Math.random() * 16 + 12;
+                this.speedY = Math.random() * 3 + 2;
+                this.speedX = Math.random() * 4 - 2;
+                this.rotation = Math.random() * 360;
+                this.rotationSpeed = Math.random() * 6 - 3;
+                this.color = ['🌸', '🌺', '💮', '✨', '⭐'][Math.floor(Math.random() * 5)];
+                this.opacity = 1.0;
+            }
+            update() {
+                this.y += this.speedY;
+                this.x += this.speedX + Math.sin(this.y * 0.02) * 1.5;
+                this.rotation += this.rotationSpeed;
+                if (this.y > effectCanvas.height + 50) {
+                    this.opacity = 0;
+                }
+            }
+            draw() {
+                effectCtx.save();
+                effectCtx.translate(this.x, this.y);
+                effectCtx.rotate((this.rotation * Math.PI) / 180);
+                effectCtx.font = `${this.size}px sans-serif`;
+                effectCtx.globalAlpha = this.opacity;
+                effectCtx.textAlign = 'center';
+                effectCtx.textBaseline = 'middle';
+                effectCtx.fillText(this.color, 0, 0);
+                effectCtx.restore();
+            }
+        }
+
+        // Particle System for Lightning / Sparks
+        class SparkParticle {
+            constructor() {
+                this.x = Math.random() * effectCanvas.width;
+                this.y = Math.random() * (effectCanvas.height * 0.5);
+                this.size = Math.random() * 4 + 2;
+                this.speedX = Math.random() * 10 - 5;
+                this.speedY = Math.random() * 10 - 5;
+                this.life = 30;
+                this.color = '#38bdf8';
+            }
+            update() {
+                this.x += this.speedX;
+                this.y += this.speedY;
+                this.life--;
+            }
+            draw() {
+                effectCtx.save();
+                effectCtx.fillStyle = this.color;
+                effectCtx.shadowBlur = 15;
+                effectCtx.shadowColor = '#38bdf8';
+                effectCtx.beginPath();
+                effectCtx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+                effectCtx.fill();
+                effectCtx.restore();
+            }
+        }
+
+        function triggerVictoryFX() {
+            particles = [];
+            for (let i = 0; i < 70; i++) {
+                particles.push(new FlowerParticle());
+            }
+        }
+
+        function triggerDefeatFX() {
+            particles = [];
+            for (let i = 0; i < 50; i++) {
+                particles.push(new SparkParticle());
+            }
+        }
+
+        // Effect Animation Loop
+        function animateEffects() {
+            effectCtx.clearRect(0, 0, effectCanvas.width, effectCanvas.height);
+            particles.forEach((p, index) => {
+                p.update();
+                p.draw();
+                if (p.opacity <= 0 || p.life <= 0) {
+                    particles.splice(index, 1);
+                }
+            });
+            requestAnimationFrame(animateEffects);
+        }
+        animateEffects();
+
+        // Gesture Recognition Algorithm based on Finger Tip & Joint distances
+        function recognizeGesture(landmarks) {
+            const wrist = landmarks[0];
+            const isExtended = (tipIdx, pipIdx) => {
+                const tip = landmarks[tipIdx];
+                const pip = landmarks[pipIdx];
+                const dTip = Math.hypot(tip.x - wrist.x, tip.y - wrist.y);
+                const dPip = Math.hypot(pip.x - wrist.x, pip.y - wrist.y);
+                return dTip > dPip;
+            };
+
+            const indexExtended = isExtended(8, 6);
+            const middleExtended = isExtended(12, 10);
+            const ringExtended = isExtended(16, 14);
+            const pinkyExtended = isExtended(20, 18);
+
+            let extendedCount = 0;
+            if (indexExtended) extendedCount++;
+            if (middleExtended) extendedCount++;
+            if (ringExtended) extendedCount++;
+            if (pinkyExtended) extendedCount++;
+
+            if (extendedCount === 0) {
+                return { name: '바위', emoji: '✊' };
+            } else if (extendedCount === 2 && indexExtended && middleExtended) {
+                return { name: '가위', emoji: '✌️' };
+            } else if (extendedCount >= 4) {
+                return { name: '보', emoji: '✋' };
+            } else {
+                return { name: '판독중', emoji: '✊' };
+            }
+        }
+
+        // Mediapipe Hands Setup
+        const hands = new Hands({
+            locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+        });
+
+        hands.setOptions({
+            maxNumHands: 1,
+            modelComplexity: 1,
+            minDetectionConfidence: 0.6,
+            minTrackingConfidence: 0.6
+        });
+
+        hands.onResults((results) => {
+            canvasCtx.save();
+            canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                const landmarks = results.multiHandLandmarks[0];
+                handDetected = true;
+                
+                // Draw skeleton with custom cyberpunk styling
+                drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS, {color: '#38bdf8', lineWidth: 4});
+                drawLandmarks(canvasCtx, landmarks, {color: '#f43f5e', lineWidth: 2, radius: 4});
+
+                const gesture = recognizeGesture(landmarks);
+                currentGesture = gesture.name;
+                playerDetectedText.innerText = `인식됨: ${gesture.name}`;
+                if (!isPlaying && gesture.name !== '판독중') {
+                    playerChoiceBox.innerText = gesture.emoji;
+                }
+            } else {
+                handDetected = false;
+                currentGesture = 'UNKNOWN';
+                playerDetectedText.innerText = '손을 찾을 수 없음';
+            }
+            canvasCtx.restore();
+        });
+
+        // Initialize Camera
+        const camera = new Camera(videoElement, {
+            onFrame: async () => {
+                await hands.send({ image: videoElement });
+            },
+            width: 1280,
+            height: 720
+        });
+        camera.start().catch(err => {
+            console.error("Camera access error:", err);
+            gestureIndicator.innerText = "웹캠 권한이 필요하거나 사용 중입니다.";
+        });
+
+        // Auto-trigger loop when hand is detected
+        async function checkAutoStart() {
+            if (!isPlaying && handDetected) {
+                await startRound();
+            }
+            setTimeout(checkAutoStart, 1000);
+        }
+        setTimeout(checkAutoStart, 2000);
+
+        // Game Round Logic (with automatic redraw on Draw)
+        async function startRound() {
+            if (isPlaying) return;
+            isPlaying = true;
+            resultBanner.style.opacity = '0';
+            aiChoiceBox.innerText = '🤖';
+            aiDetectedText.innerText = 'AI 고민중...';
+
+            // Countdown Sequence (3, 2, 1)
+            const countSeq = ['3', '2', '1', 'GO!'];
+            for (let i = 0; i < countSeq.length; i++) {
+                countdownDisplay.innerText = countSeq[i];
+                countdownDisplay.classList.remove('scale-0');
+                countdownDisplay.classList.add('scale-125');
+                await new Promise(r => setTimeout(r, 500));
+                countdownDisplay.classList.remove('scale-125');
+                countdownDisplay.classList.add('scale-0');
+                await new Promise(r => setTimeout(r, 100));
+            }
+
+            // Lock Player Choice at 'GO!'
+            const choices = [
+                { name: '가위', emoji: '✌️' },
+                { name: '바위', emoji: '✊' },
+                { name: '보', emoji: '✋' }
+            ];
+            const aiChoice = choices[Math.floor(Math.random() * choices.length)];
+            aiChoiceBox.innerText = aiChoice.emoji;
+            aiDetectedText.innerText = `AI: ${aiChoice.name}`;
+
+            const playerFinal = (currentGesture === '가위' || currentGesture === '바위' || currentGesture === '보') 
+                ? currentGesture 
+                : choices[Math.floor(Math.random() * choices.length)].name;
+
+            // Determine Winner & Trigger Effects/Sound
+            let resultText = '';
+            let textColor = '';
+            let isDraw = false;
+
+            if (playerFinal === aiChoice.name) {
+                resultText = 'DRAW! 다시 시작...';
+                textColor = 'text-yellow-400';
+                isDraw = true;
+            } else if (
+                (playerFinal === '가위' && aiChoice.name === '보') ||
+                (playerFinal === '바위' && aiChoice.name === '가위') ||
+                (playerFinal === '보' && aiChoice.name === '바위')
+            ) {
+                resultText = 'VICTORY!';
+                textColor = 'text-emerald-400';
+                playerScore++;
+                playerScoreEl.innerText = playerScore;
+                playSharalaSound();
+                triggerVictoryFX();
+            } else {
+                resultText = 'DEFEAT!';
+                textColor = 'text-rose-500';
+                aiScore++;
+                aiScoreEl.innerText = aiScore;
+                playThunderSound();
+                triggerDefeatFX();
+            }
+
+            resultBanner.innerText = resultText;
+            resultBanner.className = `text-3xl md:text-5xl font-black font-cyber tracking-wider ${textColor} drop-shadow-lg transition-opacity duration-300 opacity-100`;
+
+            // Reset or immediate retry if draw
+            setTimeout(() => {
+                isPlaying = false;
+                if (isDraw) {
+                    startRound(); // Automatically restart round on Draw
+                }
+            }, isDraw ? 1500 : 2500);
+        }
+    </script>
+</body>
+</html>
